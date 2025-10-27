@@ -1,0 +1,942 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Radar de Trilhas Formativas</title>
+    <!-- Carrega o Tailwind CSS --><script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Carrega a biblioteca D3.js --><script src="https://d3js.org/d3.v7.min.js"></script>
+    
+    <style>
+        /* Estilo para a fonte Inter */
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&display=swap');
+        
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #0f172a; /* bg-slate-900 */
+            color: #F8FAFC; /* text-slate-50 */
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: flex-start; 
+            min-height: 100vh;
+            padding: 1rem 2rem; /* Ajustado padding */
+            box-sizing: border-box;
+            overflow: hidden; 
+        }
+        
+        /* Container principal (Layout Flex) */
+        #app-container {
+            width: 100%;
+            max-width: 1600px; /* Aumentado para o layout de 2 colunas */
+            display: flex;
+            flex-direction: column; /* Padrão mobile */
+            xl:flex-direction: row; /* Lado a lado em telas grandes */
+            gap: 1.5rem; 
+        }
+        
+        /* Coluna da Esquerda (Gráfico e Filtros) */
+        #left-column {
+            flex-grow: 1;
+            display: flex;
+            flex-direction: column;
+            width: 100%;
+            xl:width: 65%; /* 65% em telas grandes */
+        }
+
+        /* Coluna da Direita (Painel de Info) */
+        #info-panel {
+            width: 100%;
+            xl:width: 35%; /* 35% em telas grandes */
+            height: auto; /* Altura automática em mobile */
+            xl:height: 90vh; /* Altura da viewport em telas grandes */
+            max-height: 850px; /* Limite */
+            background-color: #1e293b; /* bg-slate-800 */
+            border-radius: 0.5rem;
+            padding: 1.5rem;
+            display: flex;
+            flex-direction: column;
+            border: 1px solid #334155;
+        }
+
+        /* Títulos */
+        h1 {
+            font-size: 2.25rem; /* text-4xl */
+            font-weight: 700; /* font-bold */
+            color: #f1f5f9; /* text-slate-100 */
+            text-align: center;
+            margin-bottom: 0.5rem;
+        }
+
+        p {
+            color: #94a3b8; /* text-slate-400 */
+            text-align: center;
+            margin-bottom: 1.5rem;
+        }
+
+        /* Container dos Filtros */
+        #filters-container {
+            display: flex;
+            flex-direction: column; 
+            sm:flex-direction: row; 
+            gap: 1rem;
+            width: 100%;
+        }
+
+        #filters-container select {
+            width: 100%;
+            flex: 1; 
+            background-color: #1e293b; /* bg-slate-800 */
+            border: 1px solid #334155; /* border-slate-700 */
+            color: #f1f5f9; /* text-slate-100 */
+            padding: 0.75rem;
+            border-radius: 0.5rem;
+            cursor: pointer;
+        }
+        
+        /* Container do Gráfico */
+        #chart-container {
+            width: 100%;
+            height: 100%; /* Ocupa altura do container pai */
+            min-height: 500px; /* Altura mínima */
+            max-height: 700px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-top: 1rem;
+        }
+
+        /* --- ESTILOS DO RADAR --- */
+
+        .radar-line {
+            fill: none;
+            stroke: #334155; 
+            stroke-opacity: 0.5;
+            stroke-width: 1px;
+        }
+        
+        .radar-label {
+            font-size: 10px;
+            font-weight: 500;
+            fill: #64748b; 
+            text-transform: uppercase;
+            pointer-events: none; 
+        }
+        
+        .sector-slice {
+            cursor: pointer;
+            fill-opacity: 0; 
+            transition: fill-opacity 0.3s ease;
+        }
+        .sector-slice:hover { fill-opacity: 0.1; }
+        .sector-slice.focused { fill-opacity: 0.15; }
+
+        .blip {
+            transition: opacity 0.3s ease, transform 0.3s ease;
+            pointer-events: none; 
+        }
+        
+        .blip circle {
+            stroke: #0f172a; 
+            stroke-width: 1.5px;
+            transition: r 0.3s ease;
+        }
+        
+        .blip text {
+            font-size: 9px;
+            font-weight: 500;
+            fill: #94a3b8; 
+            pointer-events: none;
+            transition: fill 0.3s ease, font-weight 0.3s ease, opacity 0.3s ease;
+            text-shadow: 0 0 3px #0f172a, 0 0 3px #0f172a; 
+            opacity: 0; /* Oculto por padrão */
+        }
+
+        .path-link {
+            fill: none;
+            stroke: #f59e0b; /* amber-500 */
+            stroke-width: 2.5px;
+            stroke-opacity: 0; /* Oculto por padrão */
+            pointer-events: none;
+            transition: opacity 0.3s ease;
+        }
+        
+        /* --- ESTADOS DE INTERAÇÃO --- */
+        .blip.path-highlight text {
+            opacity: 1; 
+            fill: #cbd5e1; 
+            font-weight: 500;
+        }
+        .blip.path-highlight circle { r: 6px; }
+        .path-link.path-highlight { opacity: 0.9; }
+        .blip.faded { opacity: 0.2; }
+
+
+        /* Breadcrumb */
+        #breadcrumb {
+            background-color: #1e293b; 
+            padding: 0.75rem 1.25rem;
+            border-radius: 0.5rem;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.2);
+            display: flex;
+            flex-wrap: wrap; 
+            justify-content: center;
+            align-items: center;
+            min-height: 40px; 
+            transition: opacity 0.3s ease;
+            margin-top: 1.5rem;
+        }
+        #breadcrumb span { padding: 0 0.25rem; }
+        #breadcrumb .crumb-item { color: #94a3b8; }
+        #breadcrumb .crumb-separator { color: #475569; margin: 0 0.4rem; }
+        #breadcrumb .crumb-active { color: #e2e8f0; font-weight: 700; }
+        
+        /* --- ESTILOS DO PAINEL DE INFORMAÇÃO --- */
+        #course-list-container {
+            flex-grow: 1; /* Ocupa espaço restante */
+            overflow-y: auto;
+            background-color: #0f172a; /* bg-slate-900 */
+            border-radius: 0.5rem;
+            padding: 1rem;
+        }
+        
+        #course-list li {
+            font-size: 0.875rem; /* text-sm */
+            color: #cbd5e1; /* text-slate-300 */
+            line-height: 1.4;
+        }
+        
+        /* Níveis hierárquicos para a lista */
+        #course-list .level-1 { /* Eixo */
+            font-weight: 600;
+            font-size: 1rem; /* text-base */
+            padding-top: 0.75rem;
+            margin-top: 0.75rem;
+            border-top: 1px solid #334155; /* border-slate-700 */
+        }
+        #course-list li:first-child.level-1 {
+            border-top: none; /* Remove a borda do primeiro item */
+            margin-top: 0;
+            padding-top: 0;
+        }
+        
+        /* Indentação baseada na profundidade (depth) */
+        #course-list .level-2 { padding-left: 1rem; }
+        #course-list .level-3 { padding-left: 2rem; color: #94a3b8; }
+        #course-list .level-4 { padding-left: 3rem; color: #64748b; }
+        #course-list .level-5 { padding-left: 4rem; color: #475569; }
+
+
+    </style>
+</head>
+<body>
+    <!-- Container Principal (Flex) -->
+    <div id="app-container">
+
+        <!-- Coluna da Esquerda (Gráfico e Filtros) -->
+        <div id="left-column">
+            <h1>Radar de Trilhas Formativas</h1>
+            <p>Use os filtros para explorar os Eixos e Categorias. Passe o mouse sobre um Eixo para ver as trilhas.</p>
+
+            <!-- Filtros -->
+            <div id="filters-container">
+                <select id="sector-filter">
+                    <!-- Opções de Eixos (Setores) serão inseridas aqui -->
+                </select>
+                <select id="ring-filter">
+                    <!-- Opções de Categorias (Anéis) serão inseridas aqui -->
+                </select>
+            </div> <!-- FECHA filters-container -->
+
+            <!-- Breadcrumb (REINSERIDO) -->
+            <div id="breadcrumb" class="w-full text-sm">
+                <span>Passe o mouse ou clique em um Eixo para explorar</span>
+            </div>
+
+            <!-- Container do Gráfico (REINSERIDO) -->
+            <div id="chart-container">
+                <!-- O SVG do radar será inserido aqui pelo D3 -->
+            </div>
+        </div> <!-- FECHA left-column -->
+
+        <!-- Coluna da Direita (Painel de Info) -->
+        <div id="info-panel">
+            <h2 class="text-2xl font-bold text-slate-100 mb-4">Detalhes da Seleção</h2>
+            
+            <!-- Contagem -->
+            <div class="mb-4 text-slate-300">
+                Total de Cursos Visíveis: 
+                <span id="course-count" class="font-bold text-2xl text-amber-400 ml-2">0</span>
+            </div>
+
+            <!-- NOVO: Seção de Análise Gemini -->
+            <div class="mb-4 border-y border-slate-700 py-4">
+                <button id="gemini-analyze-btn" class="w-full bg-amber-500 text-slate-900 font-bold py-2 px-4 rounded-md hover:bg-amber-400 transition-all shadow-lg disabled:opacity-50 disabled:cursor-not-allowed">
+                    ✨ Analisar Perfil da Seleção
+                </button>
+                <div id="gemini-loading" class="text-center text-slate-400 mt-3 hidden">
+                    <p>Gerando insights... Por favor, aguarde.</p>
+                </div>
+                <div id="gemini-result" class="text-sm text-slate-300 mt-3 bg-slate-900 p-3 rounded-md prose prose-invert prose-sm">
+                    <!-- O resultado da API Gemini aparecerá aqui -->
+                </div>
+            </div>
+
+
+            <!-- Lista de Cursos -->
+            <h3 class="text-lg font-semibold text-slate-200 mb-2">Cursos e Hierarquias</h3>
+            <div id="course-list-container">
+                <ul id="course-list">
+                    <!-- Itens da lista serão inseridos aqui pelo JS -->
+                </ul>
+            </div>
+        </div>
+
+    </div>
+
+    <script type="module">
+        // 1. DADOS BRUTOS (Mesma função de antes)
+        let rawData = `
+"Eixo","Engenharia","Tecnólogo","Técnico","Aprendizagem"
+"Controle e Processos Industriais","Engenharia Mecânica","Manutenção Industrial","Manutenção de Máquinas Industriais","Aprendizagem"
+"Produção Alimentícia","Engenharia Química","Processos Químicos","Agroindústria","Auxiliar de Produção"
+"Produção Alimentícia","Engenharia Química","Processos Químicos","Alimentos","Auxiliar de Produção"
+"Produção Industrial","Engenharia Química","Processos Químicos","Quimica","Auxiliar de Produção"
+"Produção Industrial","Engenharia Química","Processos Químicos","Açúcar e Álcool","Auxiliar na Produção de Açúcar e Álcool"
+"Produção Industrial","Engenharia Mecânica","Manutenção Industrial","Planejamento e Controle da Produção","Operador de Processos Industriais"
+"Controle e Processos Industriais","Engenharia Mecânica","Manutenção Industrial","Fabricação Mecânica","Operador de Processos Industriais"
+"Controle e Processos Industriais","Engenharia Mecânica","Manutenção Industrial","Mecânica","Operador de Processos Industriais"
+"Industriais Controle e Processos","Engenharia Mecânica","Manutenção Industrial","Soldagem","Operador de Processos Industriais"
+"Controle e Processos Industriais","Engenharia Mecânica","Manutenção Industrial","Eletromecânica","Operador de Processos Industriais"
+"Controle e Processos Industriais","Engenharia Mecânica","Manutenção Industrial","Manutenção Aeronáutica em Aviônicos","Mecânico de Manutenção de Máquinas Pesadas"
+"Controle e Processos Industriais","Engenharia Mecânica","Manutenção Industrial","Manutenção Aeronáutica em Célula","Mecânico de Manutenção de Máquinas Pesadas"
+"Controle e Processos Industriais","Engenharia Mecânica","Manutenção Industrial","Manutenção Aeronáutica em Grupo Motopropulsor","Mecânico de Manutenção de Máquinas Pesadas"
+"Controle e Processos Industriais\\n Controle e Processos Industriais\\n Controle e Processos Industriais","Engenharia Mecânica\\n Engenharia de Automação e Controle\\n Engenharia de Automação e Controle","Sistemas Automotivos\\n Mecâtronica Industrial\\n Automação Industrial","Manutenção Automotiva\\n Mecatrônica\\n Automação Industrial","Mecânico de Máquinas Industriais\\n Montador de Veículos Automotors\\n Eletricista Industrial\\n Eletricista Industrial"
+"Controle e Processos Industriais","Engenharia de Automação e Controle","Automação Industrial","Cibersistemas para Automação","Eletricista Industrial"
+"Controle e Processos Industriais","Engenharia de Automação e Controle","Automação Industrial","Eletroeletrônica","Eletricista Industrial"
+"Controle e Processos Industriais","Engenharia de Automação e Controle","Automação Industrial","Eletrônica","Eletricista Industrial"
+"Controle e Processos Industriais","Engenharia de Automação e Controle","Automação Industrial","Internet das Coisas - lot","Eletricista Industrial"
+"Controle e Processos Industriais","Engenharia Elétrica","Automação Industrial","Eletrotécnica","Eletricista de Instalações Prediais"
+"Controle e Processos Industriais","Engenharia Elétrica","Automação Industrial","Refrigeração e Climatização","Eletricista de Instalações Prediais"
+"Informação e Comunicação","Engenharia de Software","Análise e Desenvolvimento de Sistemas","Desenvolvimento de Sistemas","Operador de Computador"
+"Informação e Comunicação","Engenharia de Software","Análise e Desenvolvimento de Sistemas","Informática","Operador de Computador"
+"Informação e Comunicação","Engenharia de Software","Análise e Desenvolvimento de Sistemas","Programação de Jogos Digitais","Operador de Computador"
+"Controle e Processos Industriais","Engenharia de Software","Gestão da Tecnologia da Informação","Manutenção e Suporte em Informática","Operador de Computador"
+"Informação e Comunicação","Engenharia de Software","Gestão da Tecnologia da Informação","Redes de Computadores","Operador de Computador"
+"Infraestrutura","Engenharia de Produção","Processos Gerenciais","Edificações","Almoxarife de Obras"
+"Gestão e Negócios","Engenharia de Produção","Processos Gerenciais","Administração","Assistente Administrativo"
+"Gestão e Negócios","Engenharia de Produção","Logística","Logistica","Operador de Processos Logísticos"
+"Gestão e Negócios","Engenharia de Produção","Gestão da Produção Industrial","Qualidade","Auxiliar de Produção"
+"Segurança","Engenharia de Produção","Gestão da Produção Industrial","Segurança do Trabalho","Auxiliar de Produção"
+`;
+// CORREÇÃO: Dado "Manutenção e Suporte em Informática" estava listado no eixo errado, corrigido para "Informação e Comunicação"
+rawData = rawData.replace(
+    `"Controle e Processos Industriais","Engenharia de Software","Gestão da Tecnologia da Informação","Manutenção e Suporte em Informática","Operador de Computador"`,
+    `"Informação e Comunicação","Engenharia de Software","Gestão da Tecnologia da Informação","Manutenção e Suporte em Informática","Operador de Computador"`
+);
+
+
+        // 2. PROCESSAMENTO DE DADOS (USANDO A ÁRVORE)
+        function processData(csvData) {
+            const root = { name: "Mandala", children: [] };
+            const lines = csvData.trim().split('\n');
+            lines.shift(); // Remove cabeçalho
+            for (const line of lines) {
+                const correctedLine = line.replace(/\\n/g, '\n');
+                if (correctedLine.includes('\n')) {
+                    const columns = correctedLine.split('","').map(part => 
+                        part.replace(/"/g, "").trim().split('\n').map(s => s.trim())
+                    );
+                    const numRecords = columns[0].length;
+                    for (let i = 0; i < numRecords; i++) {
+                        const path = [
+                            columns[0][i] || columns[0][columns[0].length - 1],
+                            columns[1][i] || columns[1][columns[1].length - 1],
+                            columns[2][i] || columns[2][columns[2].length - 1],
+                            columns[3][i] || columns[3][columns[3].length - 1],
+                            columns[4][i] || columns[4][columns[4].length - 1]
+                        ].map(s => s.replace("Industriais Controle e Processos", "Controle e Processos Industriais"));
+                        addPath(root, path);
+                    }
+                } else {
+                    const path = correctedLine.split('","').map(part => 
+                        part.replace(/"/g, "").replace("Industriais Controle e Processos", "Controle e Processos Industriais").trim()
+                    );
+                    if (path.length === 5 && path[0] !== "Eixo") {
+                        addPath(root, path);
+                    }
+                }
+            }
+            return root;
+        }
+
+        function addPath(rootNode, path) {
+            let currentNode = rootNode;
+            for (let i = 0; i < path.length; i++) {
+                const name = path[i];
+                if (!name || name === "") continue; 
+                let childNode = currentNode.children ? currentNode.children.find(c => c.name === name) : undefined;
+                if (!childNode) {
+                    childNode = { name: name };
+                    if (i === path.length - 1) {
+                        childNode.value = 1; 
+                    } else {
+                        childNode.children = [];
+                    }
+                    if (!currentNode.children) {
+                        currentNode.children = [];
+                    }
+                    currentNode.children.push(childNode);
+                }
+                currentNode = childNode;
+            }
+        }
+
+        function flattenTreeToBlips(root) {
+            const blips = [];
+            const ringLevels = { 2: "Engenharia", 3: "Tecnólogo", 4: "Técnico", 5: "Aprendizagem" };
+            let currentSector = ""; 
+
+            function traverse(node, pathString) {
+                const name = node.data.name;
+                if (name === "Mandala") { 
+                    if (node.children) node.children.forEach(child => traverse(child, ""));
+                    return;
+                }
+                const currentPath = pathString ? `${pathString}.${name}` : name;
+                const ring = ringLevels[node.depth];
+                if (node.depth === 1) { 
+                    currentSector = name;
+                }
+                if (ring) { 
+                     blips.push({
+                        name: name,
+                        ring: ring,
+                        sector: currentSector, 
+                        path: currentPath,      
+                        depth: node.depth,
+                        parentPath: pathString,
+                        nodeRef: node 
+                    });
+                }
+                if (node.children) {
+                    node.children.forEach(child => traverse(child, currentPath));
+                }
+            }
+            traverse(root, "");
+            return blips;
+        }
+
+        // 3. CONFIGURAÇÃO DO D3 (LAYOUT DE RADAR)
+        const chartContainer = document.getElementById('chart-container');
+        const width = chartContainer.clientWidth;
+        const height = chartContainer.clientHeight > 0 ? chartContainer.clientHeight : 500; // Fallback de altura
+        const radius = Math.min(width, height) / 2 - 100; 
+
+        const rawDataObj = processData(rawData); 
+        const root = d3.hierarchy(rawDataObj); 
+        
+        // Armazena a lista mestre de blips
+        const allBlips = flattenTreeToBlips(root);
+        
+        const rings = ["Engenharia", "Tecnólogo", "Técnico", "Aprendizagem"];
+        const sectors = [...new Set(allBlips.map(b => b.sector))].sort(); // Ordena setores
+
+        const angleScale = d3.scaleBand().domain(sectors).range([0, 2 * Math.PI]);
+        const radiusScale = d3.scalePoint().domain(rings).range([radius * 0.25, radius]); 
+        const color = d3.scaleOrdinal(d3.schemeTableau10).domain(sectors); 
+
+        // 4. PRÉ-CALCULA POSIÇÕES (para jitter)
+        allBlips.forEach(blip => {
+            const baseAngle = angleScale(blip.sector) + angleScale.bandwidth() / 2;
+            const jitterAngle = (Math.random() - 0.5) * angleScale.bandwidth() * 0.8; 
+            const angle = baseAngle + jitterAngle;
+            const baseRadius = radiusScale(blip.ring);
+            const jitterRadius = (Math.random() - 0.5) * (radiusScale.step() * 0.6); 
+            const r = Math.max(0, baseRadius + jitterRadius); 
+            blip.x = r * Math.cos(angle - Math.PI / 2);
+            blip.y = r * Math.sin(angle - Math.PI / 2);
+        });
+
+        // 5. RENDERIZAÇÃO
+        const svg = d3.select("#chart-container").append("svg")
+            .attr("viewBox", [-width / 2, -height / 2, width, height])
+            .attr("width", "100%")
+            .attr("height", "100%")
+            .attr("preserveAspectRatio", "xMidYMid meet");
+
+        const g = svg.append("g"); 
+
+        const radarBg = g.append("g")
+            .attr("class", "radar-background")
+            .lower(); 
+
+        radarBg.selectAll(".radar-ring")
+            .data(rings)
+            .join("circle")
+            .attr("class", "radar-line radar-ring")
+            .attr("r", d => radiusScale(d));
+            
+        radarBg.selectAll(".ring-label")
+            .data(rings)
+            .join("text")
+            .attr("class", "radar-label")
+            .attr("y", d => -radiusScale(d) - 4) 
+            .attr("text-anchor", "middle")
+            .text(d => d);
+
+        radarBg.selectAll(".radar-spoke")
+            .data(sectors)
+            .join("line")
+            .attr("class", "radar-line radar-spoke")
+            .attr("y2", -radius)
+            .attr("transform", d => `rotate(${angleScale(d) * 180 / Math.PI})`); 
+
+        radarBg.selectAll(".sector-label")
+            .data(sectors)
+            .join("text")
+            .attr("class", "radar-label")
+            .attr("dy", "-0.4em")
+            .attr("transform", d => {
+                const angle = angleScale(d) + angleScale.bandwidth() / 2;
+                const r = radius + 20; 
+                const x = r * Math.cos(angle - Math.PI / 2);
+                const y = r * Math.sin(angle - Math.PI / 2);
+                let textAngle = angle * 180 / Math.PI;
+                if (textAngle > 90 && textAngle < 270) textAngle -= 180;
+                return `translate(${x}, ${y}) rotate(${textAngle})`;
+            })
+            .attr("text-anchor", "middle")
+            .text(d => d);
+            
+        const sectorSlices = g.append("g")
+            .attr("class", "sector-slices")
+            .lower(); 
+            
+        const arcGenerator = d3.arc()
+            .innerRadius(0)
+            .outerRadius(radius + 10) 
+            .startAngle(d => angleScale(d))
+            .endAngle(d => angleScale(d) + angleScale.bandwidth());
+
+        sectorSlices.selectAll(".sector-slice")
+            .data(sectors)
+            .join("path")
+            .attr("class", "sector-slice")
+            .attr("d", arcGenerator)
+            .attr("fill", d => color(d))
+            .on("mouseover", handleSectorMouseOver)
+            .on("mouseout", handleSectorMouseOut)
+            .on("click", handleSectorClick);
+
+
+        const pathLinksGroup = g.append("g")
+            .attr("class", "path-links");
+
+        // Grupo para os Blips (será populado pelo update)
+        const blipsGroup = g.append("g")
+            .attr("class", "blips-group");
+            
+        let focusedSector = null;
+
+        const zoom = d3.zoom()
+            .scaleExtent([0.5, 5])
+            .on("zoom", (event) => {
+                g.attr("transform", event.transform);
+            });
+        svg.call(zoom);
+
+        // 6. LÓGICA DE FILTROS E UPDATE
+        
+        const sectorFilter = d3.select("#sector-filter");
+        const ringFilter = d3.select("#ring-filter");
+        
+        // Referências D3 para o painel de informações
+        const courseCountEl = d3.select("#course-count");
+        const courseListEl = d3.select("#course-list");
+
+        // NOVO: Referências D3 para os elementos Gemini
+        const geminiBtn = d3.select("#gemini-analyze-btn");
+        const geminiLoading = d3.select("#gemini-loading");
+        const geminiResult = d3.select("#gemini-result");
+
+        // Armazena os blips filtrados atualmente
+        let currentFilteredBlips = [];
+
+
+        // Popula o filtro de Eixos (Setores)
+        sectorFilter.append("option")
+            .attr("value", "all")
+            .text("Todos os Eixos");
+        sectorFilter.selectAll("option.sector-option")
+            .data(sectors)
+            .join("option")
+            .attr("class", "sector-option")
+            .attr("value", d => d)
+            .text(d => d);
+            
+        // Popula o filtro de Categorias (Anéis)
+        ringFilter.append("option")
+            .attr("value", "all")
+            .text("Todas as Categorias");
+        ringFilter.selectAll("option.ring-option")
+            .data(rings)
+            .join("option")
+            .attr("class", "ring-option")
+            .attr("value", d => d)
+            .text(d => d);
+            
+        // Adiciona listeners
+        sectorFilter.on("change", updateVisualization);
+        ringFilter.on("change", updateVisualization);
+
+        // NOVO: System prompt para a API Gemini
+        const geminiSystemPrompt = `Você é um especialista em orientação de carreira e design educacional, focado no mercado industrial brasileiro. O usuário selecionou um Eixo de interesse (Setor) e um Nível de formação (Categoria).
+Sua tarefa é gerar uma breve análise (em 2-3 parágrafos curtos) sobre o perfil profissional correspondente a essa combinação.
+Seja encorajador, profissional e direto.
+Foco em:
+1. O tipo de trabalho/responsabilidades desse perfil.
+2. Habilidades-chave (soft skills e hard skills) importantes.
+3. Exemplos de cargos ou áreas de atuação.
+
+Se o usuário selecionar "Todos os Eixos" ou "Todas as Categorias", forneça uma visão geral mais ampla, mas adaptada ao filtro que ele forneceu (ex: "Todos os Eixos" para o nível "Técnico", ou "Produção Industrial" para "Todas as Categorias").
+
+Responda em português brasileiro e use markdown básico para formatação (negrito, listas).`;
+
+        // NOVO: Função de backoff exponencial para API
+        async function fetchWithBackoff(url, options, retries = 3, delay = 1000) {
+            try {
+                const response = await fetch(url, options);
+                if (!response.ok) {
+                    // Se a resposta não for OK (ex: 429 Too Many Requests), tenta novamente
+                    if (retries > 0 && response.status === 429) {
+                        console.warn(`API call failed with status ${response.status}. Retrying in ${delay}ms...`);
+                        await new Promise(resolve => setTimeout(resolve, delay));
+                        return fetchWithBackoff(url, options, retries - 1, delay * 2);
+                    }
+                    throw new Error(`API call failed with status ${response.status}`);
+                }
+                return response.json();
+            } catch (error) {
+                if (retries > 0) {
+                    console.warn(`API call failed with error: ${error}. Retrying in ${delay}ms...`);
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                    return fetchWithBackoff(url, options, retries - 1, delay * 2);
+                }
+                console.error("API call failed after all retries.", error);
+                throw error;
+            }
+        }
+
+        // NOVO: Função para chamar a API Gemini
+        async function callGemini(prompt) {
+            const apiKey = ""; // Deixe em branco
+            const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
+
+            const payload = {
+                contents: [{
+                    parts: [{ text: prompt }]
+                }],
+                systemInstruction: {
+                    parts: [{ text: geminiSystemPrompt }]
+                },
+                generationConfig: {
+                    temperature: 0.7,
+                    topK: 40,
+                }
+            };
+
+            try {
+                const result = await fetchWithBackoff(apiUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                
+                if (result.candidates && result.candidates.length > 0) {
+                    const text = result.candidates[0].content.parts[0].text;
+                    // Converte markdown simples (como * e \n) para HTML
+                    return text
+                        .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>') // Negrito
+                        .replace(/\*(.*?)\*/g, '<em>$1</em>') // Itálico
+                        .replace(/\n/g, '<br>'); // Novas linhas
+                } else {
+                    return "Não foi possível gerar uma análise. A resposta da API estava vazia.";
+                }
+            } catch (error) {
+                console.error("Erro ao chamar a API Gemini:", error);
+                return "Ocorreu um erro ao tentar gerar a análise. Verifique o console para mais detalhes.";
+            }
+        }
+
+        // NOVO: Handler para o botão Gemini
+        async function handleGeminiAnalysis() {
+            geminiLoading.classed("hidden", false);
+            geminiResult.html("");
+            geminiBtn.property("disabled", true);
+
+            // Pega o TEXTO dos filtros selecionados
+            const sectorText = sectorFilter.node().options[sectorFilter.node().selectedIndex].text;
+            const ringText = ringFilter.node().options[ringFilter.node().selectedIndex].text;
+
+            // Cria o prompt para o LLM
+            const userPrompt = `Gere uma análise de perfil para o Eixo: "${sectorText}" e a Categoria: "${ringText}".`;
+
+            const analysis = await callGemini(userPrompt);
+
+            geminiLoading.classed("hidden", true);
+            geminiBtn.property("disabled", false);
+            geminiResult.html(analysis);
+        }
+
+        // Adiciona o listener ao botão
+        geminiBtn.on("click", handleGeminiAnalysis);
+
+
+        // Função de linha D3 para desenhar a trilha
+        const lineGenerator = d3.line()
+            .x(d => d.x)
+            .y(d => d.y)
+            .curve(d3.curveCatmullRom.alpha(0.5)); // Linha curvada suave
+
+        /**
+         * NOVO: Função para atualizar o painel de informações
+         * @param {Array} blipsToShow - A lista de blips para exibir
+         */
+        function updateInfoPanel(blipsToShow) {
+            // 1. Atualiza a contagem
+            courseCountEl.text(blipsToShow.length);
+            
+            // 2. Ordena os blips por caminho (hierarquia)
+            blipsToShow.sort((a, b) => a.path.localeCompare(b.path));
+            
+            courseListEl.html(""); // Limpa a lista
+            
+            if (blipsToShow.length === 0) {
+                courseListEl.append("li")
+                    .attr("class", "text-slate-500 italic")
+                    .text("Nenhum curso encontrado para esta seleção.");
+                return;
+            }
+            
+            let currentSector = "";
+            blipsToShow.forEach(blip => {
+                // Divide o caminho, ex: [Eixo, Engenharia, Curso]
+                const pathParts = blip.path.split('.');
+                
+                // Adiciona o cabeçalho do Eixo (Setor) se for novo
+                if (blip.sector !== currentSector) {
+                    currentSector = blip.sector;
+                    courseListEl.append("li")
+                        .attr("class", "level-1")
+                        .style("color", color(blip.sector)) // Usa a cor do radar
+                        .text(blip.sector);
+                }
+                
+                // Pega os níveis abaixo do Eixo
+                const hierarchyName = pathParts.slice(1).join(" › "); // Ex: Engenharia › Curso
+                
+                courseListEl.append("li")
+                    .attr("class", `level-${blip.depth} text-sm`) // Usa a profundidade para indentar
+                    .html(`${hierarchyName}`); // Remove os &nbsp;
+            });
+        }
+
+
+        /**
+         * Função principal de atualização do gráfico
+         */
+        function updateVisualization() {
+            clearHighlights(); // Limpa destaques ao mudar filtro
+            
+            const selectedSector = sectorFilter.property("value");
+            const selectedRing = ringFilter.property("value");
+            
+            // Filtra os dados
+            currentFilteredBlips = allBlips.filter(b => { // Salva na variável global
+                const sectorMatch = (selectedSector === "all") || (b.sector === selectedSector);
+                const ringMatch = (selectedRing === "all") || (b.ring === selectedRing);
+                return sectorMatch && ringMatch;
+            });
+
+            // Padrão D3 Join (Enter, Update, Exit) para os blips
+            const blip = blipsGroup.selectAll(".blip")
+                .data(currentFilteredBlips, d => d.path); // Usa o caminho como chave
+                
+            // EXIT: Remove blips que não estão mais no filtro
+            blip.exit()
+                .transition().duration(300)
+                .style("opacity", 0)
+                .remove();
+                
+            // ENTER: Adiciona novos blips
+            const blipEnter = blip.enter()
+                .append("g")
+                .attr("class", "blip")
+                .attr("transform", d => `translate(${d.x}, ${d.y})`)
+                .style("opacity", 0); // Começa invisível para fade-in
+
+            blipEnter.append("circle")
+                .attr("r", 5)
+                .attr("fill", d => color(d.sector));
+                
+            blipEnter.append("text")
+                .attr("x", 8) 
+                .attr("dy", "0.31em")
+                .text(d => d.name);
+                
+            // UPDATE + ENTER: Posiciona e mostra todos os blips visíveis
+            blip.merge(blipEnter)
+                .transition().duration(300)
+                .style("opacity", 1)
+                .attr("transform", d => `translate(${d.x}, ${d.y})`);
+                
+            // ATUALIZA O PAINEL DE INFO
+            updateInfoPanel(currentFilteredBlips);
+        }
+        
+        // Inicializa o gráfico
+        updateVisualization();
+
+        // 7. FUNÇÕES DE INTERATIVIDADE (AJUSTADAS)
+
+        function handleSectorMouseOver(event, d) { // 'd' é o sectorName
+            if (focusedSector && focusedSector !== d) return; 
+            highlightSector(d);
+            updateBreadcrumb(d);
+        }
+
+        function handleSectorMouseOut(event, d) {
+            if (focusedSector) return; 
+            clearHighlights();
+        }
+
+        function handleSectorClick(event, d) {
+            event.stopPropagation();
+            if (focusedSector === d) {
+                focusedSector = null;
+                clearHighlights();
+            } else {
+                focusedSector = d;
+                highlightSector(d);
+                updateBreadcrumb(d);
+            }
+        }
+        
+        svg.on("click", () => {
+             focusedSector = null;
+             clearHighlights();
+        });
+
+
+        /**
+         * Destaca todas as trilhas hierárquicas de um setor
+         * (AJUSTADO PARA RESPEITAR FILTROS)
+         */
+        function highlightSector(sectorName) {
+            clearHighlights(true); // Esmaece todos
+            
+            // Seleciona APENAS os blips visíveis no DOM
+            const visibleBlips = blipsGroup.selectAll(".blip");
+            
+            // Filtra os blips visíveis que pertencem ao setor
+            const sectorBlipsInDOM = visibleBlips.filter(b => b.sector === sectorName);
+            const sectorBlipsData = sectorBlipsInDOM.data();
+            
+            // Agrupa blips por trilhas únicas para desenhar as linhas
+            const trails = new Map();
+            sectorBlipsData.forEach(b_in_sector => {
+                // Encontra a trilha completa para este blip (usando allBlips)
+                 const trailBlips = allBlips.filter(b_any => 
+                    b_in_sector.path.startsWith(b_any.path) || b_any.path.startsWith(b_in_sector.path)
+                 ).sort((a, b) => a.depth - b.depth); 
+                 
+                 const trailKey = trailBlips[trailBlips.length - 1].path; 
+                 if (!trails.has(trailKey)) {
+                     trails.set(trailKey, trailBlips);
+                 }
+            });
+
+            // Encontra TODOS os blips que fazem parte de TODAS as trilhas deste setor
+            const allTrailBlipsData = Array.from(trails.values()).flat();
+
+            // Esmaece os blips visíveis que NÃO estão nas trilhas
+            visibleBlips.classed("faded", b => !allTrailBlipsData.includes(b));
+            // Destaca os blips que ESTÃO nas trilhas
+            visibleBlips.filter(b => allTrailBlipsData.includes(b)).classed("path-highlight", true);
+
+            // Desenha as linhas da trilha
+            pathLinksGroup.selectAll("path")
+                .data(trails.values())
+                .join("path")
+                .attr("class", "path-link path-highlight")
+                .attr("d", lineGenerator);
+                
+            // Destaca a fatia do setor
+            sectorSlices.selectAll(".sector-slice")
+                .classed("focused", d => d === sectorName);
+                
+            // ATUALIZA O PAINEL DE INFO (com os blips do setor)
+            updateInfoPanel(sectorBlipsData);
+        }
+
+        /**
+         * Limpa todos os destaques
+         */
+        function clearHighlights(fade = false) {
+            // Seleciona os blips visíveis
+            const visibleBlips = blipsGroup.selectAll(".blip");
+            
+            visibleBlips.classed("faded", false);
+            visibleBlips.classed("path-highlight", false);
+            // Restaura o tamanho original do círculo e opacidade do texto
+            visibleBlips.select("circle").transition().duration(200).attr("r", 5);
+            visibleBlips.select("text").transition().duration(200).style("opacity", 0);
+            
+            
+            pathLinksGroup.selectAll("path").remove(); // Remove as linhas
+            sectorSlices.selectAll(".sector-slice").classed("focused", false);
+            
+            if (fade) {
+                // Esmaece apenas os blips que não estão sendo destacados
+                visibleBlips.classed("faded", true);
+            }
+            
+            if (!fade) { 
+                 updateBreadcrumb(null);
+                 // REVERTE O PAINEL DE INFO para a seleção filtrada atual
+                 updateInfoPanel(currentFilteredBlips);
+            }
+        }
+
+        /**
+         * Atualiza o breadcrumb (painel de info)
+         */
+        function updateBreadcrumb(sectorName) {
+            const breadcrumb = d3.select("#breadcrumb");
+            if (!sectorName) {
+                breadcrumb.html(`<span class="crumb-item">Use os filtros ou passe o mouse em um Eixo.</span>`);
+                return;
+            }
+            
+            breadcrumb.html(''); 
+            
+            // Adiciona o Eixo (Setor)
+            breadcrumb.append("span")
+                .attr("class", "crumb-item font-bold")
+                .style("color", color(sectorName))
+                .text(sectorName);
+                
+            breadcrumb.append("span")
+                .attr("class", "crumb-item")
+                .text("— Mostrando hierarquias deste Eixo (respeitando filtros).");
+        }
+
+    </script>
+</body>
+</html>
+
+
+
+
